@@ -67,8 +67,13 @@ app.get('/ports', async (req, res) => {
     // Open APIs solo necesitan Consumer-Key en el header
     // Buscar por cityName filtrando solo terminales y puertos de Maersk
     // locationType=TERMINAL devuelve puertos marítimos operados por Maersk
-    // Sin filtro de naviera — devuelve terminales de cualquier puerto del mundo
-    const url = `https://api.maersk.com/reference-data/locations?cityName=${encodeURIComponent(q)}&locationType=TERMINAL&limit=10`
+    // Buscar por cityName sin filtro de tipo para máxima cobertura
+    // El mínimo de limit según la spec es 10
+    const params = new URLSearchParams({
+      cityName: q,
+      limit: '10'
+    })
+    const url = `https://api.maersk.com/reference-data/locations?${params}`
     const r = await fetch(url, {
       headers: {
         'Consumer-Key': MAERSK_KEY,
@@ -165,6 +170,76 @@ app.post('/chat', async (req, res) => {
 
   } catch (err) {
     console.error('Error /chat:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /schedules?from=ESVGO&to=PECLL — Rutas punto a punto Maersk DCSA
+// ─────────────────────────────────────────────────────────────────────────────
+function calcTransitDays(dep, arr) {
+  if (!dep || !arr) return null
+  try {
+    const diff = new Date(arr) - new Date(dep)
+    return Math.round(diff / (1000 * 60 * 60 * 24))
+  } catch { return null }
+}
+
+app.get('/schedules', async (req, res) => {
+  const { from, to, date } = req.query
+  if (!from || !to) return res.status(400).json({ error: 'from y to son obligatorios' })
+
+  try {
+    const dateParam = date || new Date().toISOString().split('T')[0]
+    const params = new URLSearchParams({
+      placeOfReceipt:     from,
+      placeOfDelivery:    to,
+      departureStartDate: dateParam,
+    })
+    const url = `https://api.maersk.com/ocean/commercial-schedules/dcsa/v1/point-to-point-routes?${params}`
+    console.log('Maersk /schedules:', url)
+
+    const r = await fetch(url, {
+      headers: { 'Consumer-Key': MAERSK_KEY, 'Accept': 'application/json' }
+    })
+    const rawText = await r.text()
+    console.log('Maersk /schedules status:', r.status, rawText.slice(0, 200))
+
+    let data
+    try { data = JSON.parse(rawText) } catch(e) { data = [] }
+
+    const routes = (Array.isArray(data) ? data : []).map(route => {
+      const legs = route.legs || []
+      const firstLeg = legs[0] || {}
+      const lastLeg  = legs[legs.length - 1] || {}
+      return {
+        solutionNumber: route.solutionNumber,
+        transhipments:  legs.length - 1,
+        departure:      firstLeg.departureDateTime || '',
+        arrival:        lastLeg.arrivalDateTime   || '',
+        transitDays:    calcTransitDays(firstLeg.departureDateTime, lastLeg.arrivalDateTime),
+        cutOffs:        (route.cutOffTimes || []).map(c => ({
+          type: c.cutOffDateTimeCode,
+          date: c.cutOffDateTime
+        })),
+        legs: legs.map(leg => ({
+          vessel:    leg.vessel?.vesselName     || '',
+          service:   leg.carrierServiceName     || leg.carrierServiceCode || '',
+          voyage:    leg.carrierVoyageNumber    || '',
+          pol:       leg.loadLocation?.UNLocationCode    || '',
+          polName:   leg.loadLocation?.locationName      || '',
+          pod:       leg.dischargeLocation?.UNLocationCode || '',
+          podName:   leg.dischargeLocation?.locationName   || '',
+          departure: leg.departureDateTime || '',
+          arrival:   leg.arrivalDateTime   || '',
+        }))
+      }
+    })
+
+    res.json(routes)
+  } catch (err) {
+    console.error('Error /schedules:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
