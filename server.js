@@ -22,7 +22,7 @@ app.use(cors({
 const MAERSK_KEY      = process.env.MAERSK_KEY
 const MAERSK_SECRET   = process.env.MAERSK_SECRET
 const ANTHROPIC_KEY   = process.env.ANTHROPIC_KEY
-const MAERSK_BASE     = 'https://api.maersk.com'
+const MAERSK_BASE     = 'https://api.maersk.com/maersk-locations/v2'
 const ANTHROPIC_BASE  = 'https://api.anthropic.com'
 
 // ── Cache de token Maersk ─────────────────────────────────────────────────────
@@ -65,7 +65,10 @@ app.get('/ports', async (req, res) => {
 
   try {
     // Open APIs solo necesitan Consumer-Key en el header
-    const url = `${MAERSK_BASE}/locations?locationType=Port&portNameStartsWith=${encodeURIComponent(q)}&limit=${limit}`
+    // Parámetros correctos según OpenAPI spec de Maersk Locations v4
+    // cityName busca ciudades/puertos por nombre parcial
+    // vesselOperatorCarrierCode=MAEU filtra solo puertos Maersk
+    const url = `https://api.maersk.com/reference-data/locations?cityName=${encodeURIComponent(q)}&vesselOperatorCarrierCode=MAEU&limit=10`
     const r = await fetch(url, {
       headers: {
         'Consumer-Key': MAERSK_KEY,
@@ -86,10 +89,11 @@ app.get('/ports', async (req, res) => {
       : []
     
     const ports = list.map(p => ({
-      name:        p.name || p.portName || '',
-      code:        p.UNLocationCode || p.unloCode || p.locode || '',
+      name:        p.cityName || p.locationName || '',
+      code:        p.UNLocationCode || '',
       country:     p.countryCode || '',
       countryName: p.countryName || '',
+      type:        p.locationType || '',
     })).filter(p => p.name)
     
     res.json(ports)
