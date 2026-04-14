@@ -32,13 +32,10 @@ async function getMaerskToken() {
   if (maerskToken.value && Date.now() < maerskToken.expires) {
     return maerskToken.value
   }
-  const res = await fetch(`${MAERSK_BASE}/customer-identity/oauth/v2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=client_credentials&client_id=${MAERSK_KEY}&client_secret=${MAERSK_SECRET}`
-  })
-  const data = await res.json()
-  if (!data.access_token) throw new Error('No se pudo obtener token de Maersk')
+  // Maersk Open APIs usan el Consumer Key directamente en el header
+  // No necesitan OAuth token para las Open APIs (Locations, Vessels, Commodities)
+  // Devolvemos el Consumer Key como "token" para usarlo en las llamadas
+  return MAERSK_KEY
   maerskToken = {
     value: data.access_token,
     expires: Date.now() + (data.expires_in - 300) * 1000
@@ -67,11 +64,10 @@ app.get('/ports', async (req, res) => {
   if (q.length < 2) return res.json([])
 
   try {
-    const token = await getMaerskToken()
+    // Open APIs solo necesitan Consumer-Key en el header
     const url = `${MAERSK_BASE}/locations?locationType=Port&portNameStartsWith=${encodeURIComponent(q)}&limit=${limit}`
     const r = await fetch(url, {
       headers: {
-        'Authorization': `Bearer ${token}`,
         'Consumer-Key': MAERSK_KEY
       }
     })
