@@ -68,16 +68,30 @@ app.get('/ports', async (req, res) => {
     const url = `${MAERSK_BASE}/locations?locationType=Port&portNameStartsWith=${encodeURIComponent(q)}&limit=${limit}`
     const r = await fetch(url, {
       headers: {
-        'Consumer-Key': MAERSK_KEY
+        'Consumer-Key': MAERSK_KEY,
+        'Accept': 'application/json'
       }
     })
-    const data = await r.json()
-    const ports = (Array.isArray(data) ? data : []).map(p => ({
-      name:        p.name || '',
-      code:        p.UNLocationCode || '',
+    const rawText = await r.text()
+    console.log('Maersk /ports status:', r.status)
+    console.log('Maersk /ports raw:', rawText.slice(0, 500))
+    
+    let data
+    try { data = JSON.parse(rawText) } catch(e) { data = [] }
+    
+    // La API puede devolver el array directamente o dentro de un objeto
+    const list = Array.isArray(data) ? data 
+      : Array.isArray(data?.locations) ? data.locations
+      : Array.isArray(data?.data) ? data.data
+      : []
+    
+    const ports = list.map(p => ({
+      name:        p.name || p.portName || '',
+      code:        p.UNLocationCode || p.unloCode || p.locode || '',
       country:     p.countryCode || '',
       countryName: p.countryName || '',
-    }))
+    })).filter(p => p.name)
+    
     res.json(ports)
   } catch (err) {
     console.error('Error /ports:', err.message)
