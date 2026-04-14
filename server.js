@@ -67,7 +67,8 @@ app.get('/ports', async (req, res) => {
     // Open APIs solo necesitan Consumer-Key en el header
     // Buscar por cityName filtrando solo terminales y puertos de Maersk
     // locationType=TERMINAL devuelve puertos marítimos operados por Maersk
-    const url = `https://api.maersk.com/reference-data/locations?cityName=${encodeURIComponent(q)}&vesselOperatorCarrierCode=MAEU&locationType=TERMINAL&limit=10`
+    // Sin filtro de naviera — devuelve terminales de cualquier puerto del mundo
+    const url = `https://api.maersk.com/reference-data/locations?cityName=${encodeURIComponent(q)}&locationType=TERMINAL&limit=10`
     const r = await fetch(url, {
       headers: {
         'Consumer-Key': MAERSK_KEY,
