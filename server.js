@@ -260,10 +260,6 @@ app.get('/schedules', async (req, res) => {
 
 
 // Cliente Supabase con service key (bypass RLS, operaciones server-side)
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-)
 function normalizeTrackCargo(raw, containerId) {
   const events = (raw.events || raw.milestones || []).map(e => ({
     event_time:  e.timestamp || e.date || e.event_time,
