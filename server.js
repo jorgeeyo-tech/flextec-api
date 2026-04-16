@@ -258,18 +258,11 @@ app.get('/schedules', async (req, res) => {
 //   SUPABASE_SERVICE_KEY=eyJ...
 // ══════════════════════════════════════════════════════════════════════
 
-const { createClient } = require('@supabase/supabase-js')
-
-const TRACKCARGO_API  = 'https://api.trackcargo.co/v1'
-const TRACKCARGO_KEY  = process.env.TRACKCARGO_API_KEY
 
 // Cliente Supabase con service key (bypass RLS, operaciones server-side)
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-)
-
-// ── Normaliza la respuesta de TrackCargo a formato interno ──────────
+  
 function normalizeTrackCargo(raw, containerId) {
   const events = (raw.events || raw.milestones || []).map(e => ({
     event_time:  e.timestamp || e.date || e.event_time,
