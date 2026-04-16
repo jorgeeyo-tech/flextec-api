@@ -4,6 +4,7 @@
   "description": "FlexTec API Server — proxy seguro para Maersk y otros servicios",
   "main": "server.js",
   "scripts": {
+    "build": "npm install",
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
