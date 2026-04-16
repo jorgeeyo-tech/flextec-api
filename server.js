@@ -1,7 +1,7 @@
 const express = require('express')
 const cors    = require('cors')
 const fetch   = require('node-fetch')
-
+const { createClient } = require('@supabase/supabase-js')
 const app = express()
 app.use(express.json({ limit: '20mb' }))  // PDFs en base64 son grandes
 
@@ -24,7 +24,13 @@ const MAERSK_SECRET   = process.env.MAERSK_SECRET
 const ANTHROPIC_KEY   = process.env.ANTHROPIC_KEY
 const MAERSK_BASE     = 'https://api.maersk.com/maersk-locations/v2'
 const ANTHROPIC_BASE  = 'https://api.anthropic.com'
+const TRACKCARGO_KEY = process.env.TRACKCARGO_API_KEY
+const TRACKCARGO_API = 'https://api.trackcargo.co/v1'
 
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+)
 // ── Cache de token Maersk ─────────────────────────────────────────────────────
 let maerskToken = { value: null, expires: 0 }
 
@@ -243,7 +249,194 @@ app.get('/schedules', async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+// ══════════════════════════════════════════════════════════════════════
+// TRACKING ENDPOINT — añadir a tu servidor Railway (server.js / index.js)
+// ══════════════════════════════════════════════════════════════════════
+// Variables de entorno a añadir en Railway:
+//   TRACKCARGO_API_KEY=tu_api_key_aqui
+//   SUPABASE_URL=https://xxxx.supabase.co
+//   SUPABASE_SERVICE_KEY=eyJ...
+// ══════════════════════════════════════════════════════════════════════
 
+const { createClient } = require('@supabase/supabase-js')
+
+const TRACKCARGO_API  = 'https://api.trackcargo.co/v1'
+const TRACKCARGO_KEY  = process.env.TRACKCARGO_API_KEY
+
+// Cliente Supabase con service key (bypass RLS, operaciones server-side)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+)
+
+// ── Normaliza la respuesta de TrackCargo a formato interno ──────────
+function normalizeTrackCargo(raw, containerId) {
+  const events = (raw.events || raw.milestones || []).map(e => ({
+    event_time:  e.timestamp || e.date || e.event_time,
+    location:    e.location?.name || e.location || e.port || '',
+    status_code: e.status || e.event_code || e.milestone || '',
+    description: e.description || e.event_description || '',
+    vessel:      e.vessel?.name || e.vessel || '',
+    voyage:      e.voyage || e.voyage_number || '',
+  }))
+
+  // Detecta el evento más reciente
+  const latest = events[0] || {}
+
+  return {
+    container_id:   containerId.toUpperCase(),
+    shipping_line:  raw.carrier || raw.shipping_line || raw.scac || '',
+    current_status: raw.status || raw.shipment_status || latest.status_code || 'UNKNOWN',
+    eta:            raw.eta || raw.estimated_arrival || null,
+    pol:            raw.port_of_loading?.name || raw.pol || raw.origin || '',
+    pod:            raw.port_of_discharge?.name || raw.pod || raw.destination || '',
+    vessel:         raw.vessel?.name || raw.vessel || latest.vessel || '',
+    voyage:         raw.voyage || raw.voyage_number || latest.voyage || '',
+    provider_used:  'trackcargo',
+    raw_payload:    raw,
+    fetched_at:     new Date().toISOString(),
+    events,
+  }
+}
+
+// ── Guarda snapshot y eventos en Supabase ───────────────────────────
+async function persistTracking(userId, normalized, expedienteId) {
+  // Upsert snapshot (estado actual)
+  const { error: snapError } = await supabase
+    .from('tracking_snapshots')
+    .upsert({
+      user_id:        userId,
+      container_id:   normalized.container_id,
+      shipping_line:  normalized.shipping_line,
+      current_status: normalized.current_status,
+      eta:            normalized.eta,
+      pol:            normalized.pol,
+      pod:            normalized.pod,
+      vessel:         normalized.vessel,
+      voyage:         normalized.voyage,
+      provider_used:  normalized.provider_used,
+      raw_payload:    normalized.raw_payload,
+      fetched_at:     normalized.fetched_at,
+      expediente_id:  expedienteId || null,
+    }, { onConflict: 'user_id,container_id' })
+
+  if (snapError) console.error('[tracking] snapshot upsert error:', snapError.message)
+
+  // Insert eventos nuevos (UNIQUE evita duplicados)
+  if (normalized.events.length > 0) {
+    const rows = normalized.events.map(e => ({
+      user_id:      userId,
+      container_id: normalized.container_id,
+      event_time:   e.event_time,
+      location:     e.location,
+      status_code:  e.status_code,
+      description:  e.description,
+      vessel:       e.vessel,
+      voyage:       e.voyage,
+    }))
+
+    const { error: evtError } = await supabase
+      .from('tracking_events')
+      .upsert(rows, { onConflict: 'user_id,container_id,event_time,status_code', ignoreDuplicates: true })
+
+    if (evtError) console.error('[tracking] events upsert error:', evtError.message)
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ENDPOINTS — pegar estos app.get / app.post en tu server.js
+// ══════════════════════════════════════════════════════════════════════
+
+// GET /track/:container?userId=xxx&expedienteId=xxx
+// Llama a TrackCargo, persiste en Supabase y devuelve resultado
+app.get('/track/:container', async (req, res) => {
+  const { container } = req.params
+  const { userId, expedienteId } = req.query
+
+  if (!container) return res.status(400).json({ error: 'container requerido' })
+  if (!TRACKCARGO_KEY) return res.status(500).json({ error: 'TRACKCARGO_API_KEY no configurada' })
+
+  try {
+    // Llama a TrackCargo
+    const tcRes = await fetch(`${TRACKCARGO_API}/track`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${TRACKCARGO_KEY}`,
+        'X-API-Key':     TRACKCARGO_KEY,
+      },
+      body: JSON.stringify({ tracking_number: container.toUpperCase() }),
+    })
+
+    if (!tcRes.ok) {
+      const err = await tcRes.text()
+      return res.status(tcRes.status).json({ error: `TrackCargo error ${tcRes.status}: ${err}` })
+    }
+
+    const raw        = await tcRes.json()
+    const normalized = normalizeTrackCargo(raw, container)
+
+    // Persiste si tenemos userId
+    if (userId) {
+      await persistTracking(userId, normalized, expedienteId)
+    }
+
+    res.json(normalized)
+
+  } catch (err) {
+    console.error('[/track] error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /track/:container/history?userId=xxx
+// Devuelve el historial guardado en Supabase (sin llamar a TrackCargo)
+app.get('/track/:container/history', async (req, res) => {
+  const { container } = req.params
+  const { userId }    = req.query
+
+  if (!userId) return res.status(400).json({ error: 'userId requerido' })
+
+  try {
+    const { data, error } = await supabase
+      .from('tracking_events')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('container_id', container.toUpperCase())
+      .order('event_time', { ascending: false })
+      .limit(50)
+
+    if (error) throw new Error(error.message)
+    res.json(data || [])
+
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /tracking/active?userId=xxx
+// Lista todos los snapshots activos del usuario
+app.get('/tracking/active', async (req, res) => {
+  const { userId } = req.query
+  if (!userId) return res.status(400).json({ error: 'userId requerido' })
+
+  try {
+    const { data, error } = await supabase
+      .from('tracking_snapshots')
+      .select(`
+        *,
+        expedientes(referencia, naviera, destino_nombre, eta)
+      `)
+      .eq('user_id', userId)
+      .order('fetched_at', { ascending: false })
+
+    if (error) throw new Error(error.message)
+    res.json(data || [])
+
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
 // ─────────────────────────────────────────────────────────────────────────────
 // Arrancar
 // ─────────────────────────────────────────────────────────────────────────────
