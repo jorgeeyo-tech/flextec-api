@@ -312,13 +312,12 @@ app.get('/track/:container', async (req, res) => {
 
   try {
     // ── PASO 1: Crear orden de tracking ──────────────────────────────────────
-    // Envío con múltiples variantes del campo (alguna debería coincidir)
+    // Probar con wrapper "data" anidado (típico en APIs que responden con data.success)
     const reqBody = {
-      trackingId:           containerUC,
-      shipmentTrackingType: 'container',
-      trackingType:         'container',
-      type:                 'container',
-      shipment_tracking_type: 'container',
+      data: {
+        trackingId:           containerUC,
+        shipmentTrackingType: 'container',
+      }
     }
     const createUrl = `${TRACKCARGO_API}/client-orders/create/tracking/sea`
     console.log('[/track] SENDING to:', createUrl, 'body:', JSON.stringify(reqBody))
