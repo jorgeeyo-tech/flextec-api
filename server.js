@@ -420,4 +420,5 @@ app.listen(PORT, () => {
   console.log(`   MAERSK_KEY:    ${MAERSK_KEY    ? '✓' : '✗ FALTA'}`)
   console.log(`   ANTHROPIC_KEY: ${ANTHROPIC_KEY ? '✓' : '✗ FALTA'}`)
   console.log(`   TRACKCARGO:    ${TRACKCARGO_KEY ? '✓' : '✗ FALTA'}`)
-  console.log(`   SUPABASE
+  console.log(`   SUPABASE:      ${process.env.SUPABASE_URL ? '✓' : '✗ FALTA'}`)
+})
