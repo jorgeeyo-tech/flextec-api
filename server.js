@@ -312,12 +312,11 @@ app.get('/track/:container', async (req, res) => {
 
   try {
     // ── PASO 1: Crear orden de tracking ──────────────────────────────────────
-    const reqBody = {
-      trackingId:           containerUC,
-      shipmentTrackingType: 'container',
-    }
-    console.log('[/track] SENDING body:', JSON.stringify(reqBody))
-    const createRes = await fetch(`${TRACKCARGO_API}/client-orders/create/tracking/sea`, {
+    // Intentar con el tipo en la URL: /tracking/sea/container
+    const reqBody = { trackingId: containerUC }
+    const createUrl = `${TRACKCARGO_API}/client-orders/create/tracking/sea/container`
+    console.log('[/track] SENDING to:', createUrl, 'body:', JSON.stringify(reqBody))
+    const createRes = await fetch(createUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
