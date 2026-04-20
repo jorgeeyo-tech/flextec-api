@@ -229,25 +229,88 @@ app.get('/schedules', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // TRACKING — TrackCargo + Supabase
 // ─────────────────────────────────────────────────────────────────────────────
-function normalizeTrackCargo(raw, containerId) {
-  const events = (raw.events || raw.milestones || []).map(e => ({
-    event_time:  e.timestamp || e.date || e.event_time,
-    location:    e.location?.name || e.location || e.port || '',
-    status_code: e.status || e.event_code || e.milestone || '',
-    description: e.description || e.event_description || '',
-    vessel:      e.vessel?.name || e.vessel || '',
-    voyage:      e.voyage || e.voyage_number || '',
-  }))
-  const latest = events[0] || {}
+function normalizeTrackCargo(raw, containerId, scacCode) {
+  // TrackCargo responde con { data: { trackingData: {...}, status }, dataDescription }
+  const tracking = raw?.data?.trackingData || raw?.trackingData || {}
+  const legs     = Array.isArray(tracking.legs) ? tracking.legs : []
+  const firstLeg = legs[0] || {}
+  const lastLeg  = legs[legs.length - 1] || firstLeg
+
+  const now    = Date.now()
+  const tStart = l => (l?.leg_start_utc ? new Date(l.leg_start_utc).getTime() : null)
+  const tEnd   = l => (l?.leg_end_utc   ? new Date(l.leg_end_utc).getTime()   : null)
+
+  // Leg activo: aquel cuya ventana [start, end] contiene "now".
+  // Si no hay, el primero cuyo end esté en el futuro; si no, el último leg.
+  let activeLeg = legs.find(l => { const s=tStart(l), e=tEnd(l); return s && e && s <= now && e >= now })
+  if (!activeLeg) activeLeg = legs.find(l => { const e=tEnd(l); return e && e >= now }) || lastLeg
+
+  const fmtPort = p => {
+    if (!p) return ''
+    const base = p.city || p.unloc || ''
+    const cc   = p.country?.country_code
+    return cc && base ? `${base}, ${cc}` : base
+  }
+
+  // ETD global = salida del primer leg. ETA global = llegada del último leg.
+  const eta = tracking.last_pod_eta_iso?.date || tracking.first_pod_eta_iso?.date || lastLeg.leg_end_utc  || null
+  const etd = tracking.first_pol_etd_iso?.date || firstLeg.leg_start_utc                                   || null
+
+  // Status derivado del timeline
+  let currentStatus = 'UNKNOWN'
+  const lastEnd    = tEnd(lastLeg)
+  const firstStart = tStart(firstLeg)
+  if (lastEnd && lastEnd < now)            currentStatus = 'ARRIVED'
+  else if (activeLeg && tStart(activeLeg) && tStart(activeLeg) <= now) currentStatus = 'IN_TRANSIT'
+  else if (firstStart && firstStart > now) currentStatus = 'LOADED'
+  else if (legs.length > 0)                currentStatus = 'IN_TRANSIT'
+
+  // Sintetizar eventos desde los legs (TrackCargo nunca devuelve events discretos).
+  const events = []
+  legs.forEach(leg => {
+    const pFrom = fmtPort(leg.port_from)
+    const pTo   = fmtPort(leg.port_to)
+    if (leg.leg_start_utc) {
+      const past = new Date(leg.leg_start_utc).getTime() < now
+      events.push({
+        event_time:  leg.leg_start_utc,
+        location:    pFrom,
+        status_code: past ? 'DEPARTED' : 'ETD',
+        description: past ? `Salida de ${pFrom || '—'}` : `ETD ${pFrom || '—'}`,
+        vessel:      leg.vessel_name || '',
+        voyage:      leg.voyage_no   || '',
+      })
+    }
+    if (leg.leg_end_utc) {
+      const past = new Date(leg.leg_end_utc).getTime() < now
+      events.push({
+        event_time:  leg.leg_end_utc,
+        location:    pTo,
+        status_code: past ? 'ARRIVED' : 'ETA',
+        description: past ? `Llegada a ${pTo || '—'}` : `ETA ${pTo || '—'}`,
+        vessel:      leg.vessel_name || '',
+        voyage:      leg.voyage_no   || '',
+      })
+    }
+  })
+  events.sort((a, b) => new Date(b.event_time) - new Date(a.event_time))
+
+  const shippingLine =
+       tracking.carrier_name
+    || tracking.carrier?.name
+    || raw?.data?.carrier_name
+    || (scacCode || '')
+
   return {
     container_id:   containerId.toUpperCase(),
-    shipping_line:  raw.carrier || raw.shipping_line || raw.scac || '',
-    current_status: raw.status || raw.shipment_status || latest.status_code || 'UNKNOWN',
-    eta:            raw.eta || raw.estimated_arrival || null,
-    pol:            raw.port_of_loading?.name || raw.pol || raw.origin || '',
-    pod:            raw.port_of_discharge?.name || raw.pod || raw.destination || '',
-    vessel:         raw.vessel?.name || raw.vessel || latest.vessel || '',
-    voyage:         raw.voyage || raw.voyage_number || latest.voyage || '',
+    shipping_line:  shippingLine,
+    current_status: currentStatus,
+    eta,
+    etd,
+    pol:            fmtPort(firstLeg.port_from),
+    pod:            fmtPort(lastLeg.port_to),
+    vessel:         activeLeg?.vessel_name || lastLeg.vessel_name || '',
+    voyage:         activeLeg?.voyage_no   || lastLeg.voyage_no   || '',
     provider_used:  'trackcargo',
     raw_payload:    raw,
     fetched_at:     new Date().toISOString(),
@@ -387,7 +450,7 @@ app.get('/track/:container', async (req, res) => {
 
     let raw
     try { raw = JSON.parse(trackText) } catch { raw = {} }
-    const normalized = normalizeTrackCargo(raw, container)
+    const normalized = normalizeTrackCargo(raw, container, scacCode)
 
     if (userId) await persistTracking(userId, normalized, expedienteId)
 
