@@ -25,7 +25,7 @@ const ANTHROPIC_KEY   = process.env.ANTHROPIC_KEY
 const MAERSK_BASE     = 'https://api.maersk.com/maersk-locations/v2'
 const ANTHROPIC_BASE  = 'https://api.anthropic.com'
 const TRACKCARGO_KEY  = process.env.TRACKCARGO_API_KEY
-const TRACKCARGO_API  = 'https://api.trackcargo.co/v1'
+const TRACKCARGO_API  = 'https://api.trackcargo.com/api/v1'
 
 // ── Supabase — cliente lazy (se crea al primer uso, no al arrancar) ───────────
 let _supabase = null
@@ -296,6 +296,11 @@ async function persistTracking(userId, normalized, expedienteId) {
 }
 
 // GET /track/:container?userId=xxx&expedienteId=xxx
+//
+// Flujo TrackCargo (dos pasos):
+//   1. POST /api/v1/client-orders/create/tracking/sea  → crea la orden, devuelve orderId
+//   2. GET  /api/v1/client-orders/{orderId}/tracking   → consulta el tracking
+//
 app.get('/track/:container', async (req, res) => {
   const { container } = req.params
   const { userId, expedienteId } = req.query
@@ -303,23 +308,53 @@ app.get('/track/:container', async (req, res) => {
   if (!container) return res.status(400).json({ error: 'container requerido' })
   if (!TRACKCARGO_KEY) return res.status(500).json({ error: 'TRACKCARGO_API_KEY no configurada' })
 
+  const containerUC = container.toUpperCase()
+
   try {
-    const tcRes = await fetch(`${TRACKCARGO_API}/track`, {
+    // ── PASO 1: Crear orden de tracking ──────────────────────────────────────
+    const createRes = await fetch(`${TRACKCARGO_API}/client-orders/create/tracking/sea`, {
       method: 'POST',
       headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${TRACKCARGO_KEY}`,
-        'X-API-Key':     TRACKCARGO_KEY,
+        'Content-Type': 'application/json',
+        'x-api-key':    TRACKCARGO_KEY,
       },
-      body: JSON.stringify({ tracking_number: container.toUpperCase() }),
+      body: JSON.stringify({ container_number: containerUC }),
     })
+    const createText = await createRes.text()
+    console.log('[/track] create status:', createRes.status, 'body:', createText.slice(0, 500))
 
-    if (!tcRes.ok) {
-      const err = await tcRes.text()
-      return res.status(tcRes.status).json({ error: `TrackCargo error ${tcRes.status}: ${err}` })
+    if (!createRes.ok) {
+      return res.status(createRes.status).json({
+        error: `TrackCargo create error ${createRes.status}: ${createText}`
+      })
     }
 
-    const raw        = await tcRes.json()
+    let createData
+    try { createData = JSON.parse(createText) } catch { createData = {} }
+    const orderId = createData.orderId || createData.order_id || createData.id || createData.data?.orderId
+
+    if (!orderId) {
+      return res.status(500).json({
+        error: `TrackCargo no devolvió orderId. Respuesta: ${createText.slice(0, 300)}`
+      })
+    }
+
+    // ── PASO 2: Consultar tracking ───────────────────────────────────────────
+    const trackRes = await fetch(`${TRACKCARGO_API}/client-orders/${orderId}/tracking`, {
+      method: 'GET',
+      headers: { 'x-api-key': TRACKCARGO_KEY, 'Accept': 'application/json' },
+    })
+    const trackText = await trackRes.text()
+    console.log('[/track] tracking status:', trackRes.status, 'body:', trackText.slice(0, 500))
+
+    if (!trackRes.ok) {
+      return res.status(trackRes.status).json({
+        error: `TrackCargo tracking error ${trackRes.status}: ${trackText}`
+      })
+    }
+
+    let raw
+    try { raw = JSON.parse(trackText) } catch { raw = {} }
     const normalized = normalizeTrackCargo(raw, container)
 
     if (userId) await persistTracking(userId, normalized, expedienteId)
