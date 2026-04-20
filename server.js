@@ -425,4 +425,7 @@ const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`✅ FlexTec API corriendo en puerto ${PORT}`)
   console.log(`   MAERSK_KEY:    ${MAERSK_KEY    ? '✓' : '✗ FALTA'}`)
-  console.log(`   ANTHROPIC_KEY: ${AN
+  console.log(`   ANTHROPIC_KEY: ${ANTHROPIC_KEY ? '✓' : '✗ FALTA'}`)
+  console.log(`   TRACKCARGO:    ${TRACKCARGO_KEY ? '✓' : '✗ FALTA'}`)
+  console.log(`   SUPABASE:      ${process.env.SUPABASE_URL ? '✓' : '✗ FALTA'}`)
+})
