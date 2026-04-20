@@ -25,7 +25,7 @@ const ANTHROPIC_KEY   = process.env.ANTHROPIC_KEY
 const MAERSK_BASE     = 'https://api.maersk.com/maersk-locations/v2'
 const ANTHROPIC_BASE  = 'https://api.anthropic.com'
 const TRACKCARGO_KEY  = process.env.TRACKCARGO_API_KEY
-const TRACKCARGO_API  = 'https://api.trackcargo.com/api/v1'
+const TRACKCARGO_API  = 'https://api.trackcargo.co/api/v1'
 
 // ── Supabase — cliente lazy (se crea al primer uso, no al arrancar) ───────────
 let _supabase = null
