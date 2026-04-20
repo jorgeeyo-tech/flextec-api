@@ -303,21 +303,23 @@ async function persistTracking(userId, normalized, expedienteId) {
 //
 app.get('/track/:container', async (req, res) => {
   const { container } = req.params
-  const { userId, expedienteId } = req.query
+  const { userId, expedienteId, scac } = req.query
 
   if (!container) return res.status(400).json({ error: 'container requerido' })
   if (!TRACKCARGO_KEY) return res.status(500).json({ error: 'TRACKCARGO_API_KEY no configurada' })
 
   const containerUC = container.toUpperCase()
+  // scacCode es obligatorio por el schema de TrackCargo. Acepta el query param ?scac=XXXX, si no usa MAEU por defecto.
+  const scacCode = (scac || 'MAEU').toUpperCase()
 
   try {
     // ── PASO 1: Crear orden de tracking ──────────────────────────────────────
-    // Probar con wrapper "data" anidado (típico en APIs que responden con data.success)
+    // Estructura correcta según OpenAPI de TrackCargo (SeaShipmentOrderDtoV2):
+    // campos obligatorios: trackingId, seaShipmentTrackingType, scacCode
     const reqBody = {
-      data: {
-        trackingId:           containerUC,
-        shipmentTrackingType: 'container',
-      }
+      trackingId:              containerUC,
+      seaShipmentTrackingType: 'container',
+      scacCode:                scacCode,
     }
     const createUrl = `${TRACKCARGO_API}/client-orders/create/tracking/sea`
     console.log('[/track] SENDING to:', createUrl, 'body:', JSON.stringify(reqBody))
