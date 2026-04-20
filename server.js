@@ -318,7 +318,10 @@ app.get('/track/:container', async (req, res) => {
         'Content-Type': 'application/json',
         'x-api-key':    TRACKCARGO_KEY,
       },
-      body: JSON.stringify({ trackingId: containerUC }),
+      body: JSON.stringify({
+        trackingId: containerUC,
+        shipmentTrackingType: 'container',
+      }),
     })
     const createText = await createRes.text()
     console.log('[/track] create status:', createRes.status, 'body:', createText.slice(0, 500))
@@ -417,5 +420,4 @@ app.listen(PORT, () => {
   console.log(`   MAERSK_KEY:    ${MAERSK_KEY    ? '✓' : '✗ FALTA'}`)
   console.log(`   ANTHROPIC_KEY: ${ANTHROPIC_KEY ? '✓' : '✗ FALTA'}`)
   console.log(`   TRACKCARGO:    ${TRACKCARGO_KEY ? '✓' : '✗ FALTA'}`)
-  console.log(`   SUPABASE:      ${process.env.SUPABASE_URL ? '✓' : '✗ FALTA'}`)
-})
+  console.log(`   SUPABASE
