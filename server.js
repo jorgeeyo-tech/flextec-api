@@ -318,7 +318,7 @@ app.get('/track/:container', async (req, res) => {
         'Content-Type': 'application/json',
         'x-api-key':    TRACKCARGO_KEY,
       },
-      body: JSON.stringify({ container_number: containerUC }),
+      body: JSON.stringify({ trackingId: containerUC }),
     })
     const createText = await createRes.text()
     console.log('[/track] create status:', createRes.status, 'body:', createText.slice(0, 500))
