@@ -342,7 +342,28 @@ app.get('/track/:container', async (req, res) => {
 
     let createData
     try { createData = JSON.parse(createText) } catch { createData = {} }
-    const orderId = createData.orderId || createData.order_id || createData.id || createData.data?.orderId
+    let orderId = createData.orderId || createData.order_id || createData.id || createData.data?.orderId
+
+    // Si TrackCargo dice "already exists" (refresh de un contenedor ya trackeado),
+    // buscamos el orderId en /client-orders/recent por su trackingId.
+    if (!orderId) {
+      const errMsg = createData.error?.errorMessage || ''
+      if (/already exists/i.test(errMsg)) {
+        console.log('[/track] Order already exists, buscando en /recent ...')
+        const recentRes = await fetch(`${TRACKCARGO_API}/client-orders/recent`, {
+          headers: { 'x-api-key': TRACKCARGO_KEY, 'Accept': 'application/json' },
+        })
+        const recentText = await recentRes.text()
+        let recentData
+        try { recentData = JSON.parse(recentText) } catch { recentData = {} }
+        const list = recentData.data || recentData || []
+        const match = Array.isArray(list) ? list.find(o => (o.tracking_id || '').toUpperCase() === containerUC) : null
+        if (match?.orderId) {
+          orderId = match.orderId
+          console.log('[/track] Encontrado orderId existente:', orderId)
+        }
+      }
+    }
 
     if (!orderId) {
       return res.status(500).json({
