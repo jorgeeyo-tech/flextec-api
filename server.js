@@ -312,9 +312,15 @@ app.get('/track/:container', async (req, res) => {
 
   try {
     // ── PASO 1: Crear orden de tracking ──────────────────────────────────────
-    // Intentar con el tipo en la URL: /tracking/sea/container
-    const reqBody = { trackingId: containerUC }
-    const createUrl = `${TRACKCARGO_API}/client-orders/create/tracking/sea/container`
+    // Envío con múltiples variantes del campo (alguna debería coincidir)
+    const reqBody = {
+      trackingId:           containerUC,
+      shipmentTrackingType: 'container',
+      trackingType:         'container',
+      type:                 'container',
+      shipment_tracking_type: 'container',
+    }
+    const createUrl = `${TRACKCARGO_API}/client-orders/create/tracking/sea`
     console.log('[/track] SENDING to:', createUrl, 'body:', JSON.stringify(reqBody))
     const createRes = await fetch(createUrl, {
       method: 'POST',
@@ -419,7 +425,4 @@ const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`✅ FlexTec API corriendo en puerto ${PORT}`)
   console.log(`   MAERSK_KEY:    ${MAERSK_KEY    ? '✓' : '✗ FALTA'}`)
-  console.log(`   ANTHROPIC_KEY: ${ANTHROPIC_KEY ? '✓' : '✗ FALTA'}`)
-  console.log(`   TRACKCARGO:    ${TRACKCARGO_KEY ? '✓' : '✗ FALTA'}`)
-  console.log(`   SUPABASE:      ${process.env.SUPABASE_URL ? '✓' : '✗ FALTA'}`)
-})
+  console.log(`   ANTHROPIC_KEY: ${AN
